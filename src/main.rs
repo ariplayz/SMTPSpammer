@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::process;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::thread;
 
 #[derive(Parser)]
 #[command(name = "smtpspammer", about = "Bulk email sender via Proton Mail SMTP")]
@@ -169,33 +171,62 @@ fn main() {
                 .credentials(creds)
                 .build();
 
-            let mut sent = 0u32;
-            let mut failed = 0u32;
+            let sent = AtomicU32::new(0);
+            let failed = AtomicU32::new(0);
+            const CONCURRENCY: usize = 30;
 
-            for i in 1..=count {
-                let email = Message::builder()
-                    .from(from_mailbox.clone())
-                    .to(to_mailbox.clone())
-                    .subject(&subject)
-                    .body(body.clone())
-                    .unwrap_or_else(|e| {
-                        eprintln!("error: failed to build email message: {e}");
-                        process::exit(1);
-                    });
+            thread::scope(|s| {
+                let mut handles = Vec::with_capacity(CONCURRENCY);
 
-                match mailer.send(&email) {
-                    Ok(_) => {
-                        sent += 1;
-                        println!("[{i}/{count}] Sent successfully.");
-                    }
-                    Err(e) => {
-                        failed += 1;
-                        eprintln!("[{i}/{count}] Failed: {e}");
+                for i in 1..=count {
+                    let from = from_mailbox.clone();
+                    let to = to_mailbox.clone();
+                    let subj = &subject;
+                    let bod = body.clone();
+                    let sent_ref = &sent;
+                    let failed_ref = &failed;
+                    let mailer_ref = &mailer;
+
+                    handles.push(s.spawn(move || {
+                        let email = Message::builder()
+                            .from(from)
+                            .to(to)
+                            .subject(subj)
+                            .body(bod)
+                            .unwrap_or_else(|e| {
+                                eprintln!("error: failed to build email message: {e}");
+                                process::exit(1);
+                            });
+
+                        match mailer_ref.send(&email) {
+                            Ok(_) => {
+                                sent_ref.fetch_add(1, Ordering::Relaxed);
+                                println!("[{i}/{count}] Sent successfully.");
+                            }
+                            Err(e) => {
+                                failed_ref.fetch_add(1, Ordering::Relaxed);
+                                eprintln!("[{i}/{count}] Failed: {e}");
+                            }
+                        }
+                    }));
+
+                    if handles.len() == CONCURRENCY {
+                        for h in handles.drain(..) {
+                            let _ = h.join();
+                        }
                     }
                 }
-            }
 
-            println!("\nFinished: {sent} sent, {failed} failed.");
+                for h in handles {
+                    let _ = h.join();
+                }
+            });
+
+            println!(
+                "\nFinished: {} sent, {} failed.",
+                sent.load(Ordering::Relaxed),
+                failed.load(Ordering::Relaxed)
+            );
         }
     }
 }
