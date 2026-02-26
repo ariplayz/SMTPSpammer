@@ -127,7 +127,7 @@ jobs:
           Copy-Item target\x86_64-pc-windows-msvc\release\smtpspammer.exe target\release\smtpspammer.exe
 
       - name: Install WiX v3 toolset
-        run: choco install wixtoolset --version 3.14.1 -y
+        run: choco install wixtoolset --version 3.14.1 --allow-downgrade -y
 
       - name: Install cargo-wix
         run: cargo install cargo-wix --version 0.3.9
