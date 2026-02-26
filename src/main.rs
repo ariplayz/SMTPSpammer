@@ -7,6 +7,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
 use std::thread;
 
 #[derive(Parser)]
@@ -172,60 +173,77 @@ fn main() {
                 .build();
 
             let sent = AtomicU32::new(0);
-            let failed = AtomicU32::new(0);
             const CONCURRENCY: usize = 30;
 
-            thread::scope(|s| {
-                let mut handles = Vec::with_capacity(CONCURRENCY);
+            // pending holds the 1-based indices of emails still to be sent
+            let mut pending: Vec<u32> = (1..=count).collect();
+            let mut round = 0u32;
 
-                for i in 1..=count {
-                    let from = from_mailbox.clone();
-                    let to = to_mailbox.clone();
-                    let subj = &subject;
-                    let bod = body.clone();
-                    let sent_ref = &sent;
-                    let failed_ref = &failed;
-                    let mailer_ref = &mailer;
+            while !pending.is_empty() {
+                round += 1;
+                if round > 1 {
+                    println!("\nRetrying {} failed email(s)...", pending.len());
+                }
 
-                    handles.push(s.spawn(move || {
-                        let email = Message::builder()
-                            .from(from)
-                            .to(to)
-                            .subject(subj)
-                            .body(bod)
-                            .unwrap_or_else(|e| {
-                                eprintln!("error: failed to build email message: {e}");
-                                process::exit(1);
-                            });
+                let next_failed: Mutex<Vec<u32>> = Mutex::new(Vec::new());
 
-                        match mailer_ref.send(&email) {
-                            Ok(_) => {
-                                sent_ref.fetch_add(1, Ordering::Relaxed);
-                                println!("[{i}/{count}] Sent successfully.");
+                thread::scope(|s| {
+                    let mut handles = Vec::with_capacity(CONCURRENCY);
+
+                    for i in pending.iter().copied() {
+                        let from = from_mailbox.clone();
+                        let to = to_mailbox.clone();
+                        let subj = &subject;
+                        let bod = body.clone();
+                        let sent_ref = &sent;
+                        let next_failed_ref = &next_failed;
+                        let mailer_ref = &mailer;
+
+                        handles.push(s.spawn(move || {
+                            let email = Message::builder()
+                                .from(from)
+                                .to(to)
+                                .subject(subj)
+                                .body(bod)
+                                .unwrap_or_else(|e| {
+                                    eprintln!("error: failed to build email message: {e}");
+                                    process::exit(1);
+                                });
+
+                            match mailer_ref.send(&email) {
+                                Ok(_) => {
+                                    sent_ref.fetch_add(1, Ordering::Relaxed);
+                                    println!("[{i}/{count}] Sent successfully.");
+                                }
+                                Err(e) => {
+                                    eprintln!("[{i}/{count}] Failed: {e}");
+                                    next_failed_ref
+                                        .lock()
+                                        .unwrap_or_else(|e| e.into_inner())
+                                        .push(i);
+                                }
                             }
-                            Err(e) => {
-                                failed_ref.fetch_add(1, Ordering::Relaxed);
-                                eprintln!("[{i}/{count}] Failed: {e}");
-                            }
-                        }
-                    }));
+                        }));
 
-                    if handles.len() == CONCURRENCY {
-                        for h in handles.drain(..) {
-                            let _ = h.join();
+                        if handles.len() == CONCURRENCY {
+                            for h in handles.drain(..) {
+                                let _ = h.join();
+                            }
                         }
                     }
-                }
 
-                for h in handles {
-                    let _ = h.join();
-                }
-            });
+                    for h in handles {
+                        let _ = h.join();
+                    }
+                });
+
+                pending = next_failed.into_inner().unwrap_or_else(|e| e.into_inner());
+            }
 
             println!(
-                "\nFinished: {} sent, {} failed.",
+                "\nFinished: {} sent in {} round(s).",
                 sent.load(Ordering::Relaxed),
-                failed.load(Ordering::Relaxed)
+                round
             );
         }
     }
