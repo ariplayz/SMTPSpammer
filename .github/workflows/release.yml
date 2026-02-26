@@ -1,0 +1,228 @@
+name: Publish Release
+
+permissions:
+  contents: write
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  # Build Linux binaries and packages
+  build-linux:
+    name: Build Linux - ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    env:
+      PKG_MAINTAINER: "Ari Cummings <ari@aricummings.com>"
+      PKG_DESCRIPTION: "Bulk email sender via Proton Mail SMTP"
+    strategy:
+      matrix:
+        include:
+          - arch: x64
+            target: x86_64-unknown-linux-gnu
+            deb_arch: amd64
+            rpm_arch: x86_64
+          - arch: arm64
+            target: aarch64-unknown-linux-gnu
+            deb_arch: arm64
+            rpm_arch: aarch64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ruby-dev
+          sudo gem install fpm
+
+      - name: Build binary with cross
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross
+          cross build --release --target ${{ matrix.target }}
+
+      - name: Copy binary
+        run: |
+          mkdir -p release
+          cp target/${{ matrix.target }}/release/smtpspammer release/smtpspammer-linux-${{ matrix.arch }}
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION=${VERSION#v}
+          if [[ "$VERSION" == "master" ]] || [[ "$VERSION" == "main" ]]; then
+            VERSION="1.0.0"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build DEB package
+        run: |
+          mkdir -p deb_build/usr/local/bin
+          cp target/${{ matrix.target }}/release/smtpspammer deb_build/usr/local/bin/
+
+          fpm -s dir \
+            -t deb \
+            -n smtpspammer \
+            -v ${{ steps.version.outputs.version }} \
+            -a ${{ matrix.deb_arch }} \
+            --maintainer "$PKG_MAINTAINER" \
+            --description "$PKG_DESCRIPTION" \
+            --url "${{ github.server_url }}/${{ github.repository }}" \
+            -C deb_build \
+            usr/local/bin/smtpspammer
+
+          mv smtpspammer_${{ steps.version.outputs.version }}_${{ matrix.deb_arch }}.deb \
+             release/smtpspammer-${{ steps.version.outputs.version }}-${{ matrix.deb_arch }}.deb
+
+      - name: Build RPM package
+        run: |
+          mkdir -p rpm_build/usr/local/bin
+          cp target/${{ matrix.target }}/release/smtpspammer rpm_build/usr/local/bin/
+
+          fpm -s dir \
+            -t rpm \
+            -n smtpspammer \
+            -v ${{ steps.version.outputs.version }} \
+            -a ${{ matrix.rpm_arch }} \
+            --maintainer "$PKG_MAINTAINER" \
+            --description "$PKG_DESCRIPTION" \
+            --url "${{ github.server_url }}/${{ github.repository }}" \
+            -C rpm_build \
+            usr/local/bin/smtpspammer
+
+          mv smtpspammer-${{ steps.version.outputs.version }}-1.${{ matrix.rpm_arch }}.rpm \
+             release/smtpspammer-${{ steps.version.outputs.version }}-${{ matrix.rpm_arch }}.rpm
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: linux-${{ matrix.arch }}
+          path: release/
+
+  # Build Windows binary and MSI installer
+  build-windows:
+    name: Build Windows - x64
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build binary
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Stage binary for WiX
+        run: |
+          New-Item -ItemType Directory -Force -Path target\release
+          Copy-Item target\x86_64-pc-windows-msvc\release\smtpspammer.exe target\release\smtpspammer.exe
+
+      - name: Install WiX v3 toolset
+        run: choco install wixtoolset --version 3.14.1 -y
+
+      - name: Install cargo-wix
+        run: cargo install cargo-wix --version 0.3.9
+
+      - name: Extract version
+        id: version
+        shell: pwsh
+        run: |
+          $VERSION = "${{ github.ref_name }}" -replace '^v', ''
+          if ($VERSION -eq 'master' -or $VERSION -eq 'main') { $VERSION = '0.0.0' }
+          echo "version=$VERSION" >> $env:GITHUB_OUTPUT
+
+      - name: Build MSI installer
+        run: cargo wix --no-build --nocapture --version ${{ steps.version.outputs.version }}
+
+      - name: Collect release artifacts
+        run: |
+          New-Item -ItemType Directory -Force -Path release
+          Copy-Item target\x86_64-pc-windows-msvc\release\smtpspammer.exe release\smtpspammer-windows-x64.exe
+          Copy-Item target\wix\smtpspammer-${{ steps.version.outputs.version }}-x86_64.msi `
+            release\smtpspammer-${{ steps.version.outputs.version }}-x86_64.msi
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: windows-x64
+          path: release/
+
+  # Build macOS binaries
+  build-macos:
+    name: Build macOS - ${{ matrix.arch }}
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - arch: x64
+            target: x86_64-apple-darwin
+          - arch: arm64
+            target: aarch64-apple-darwin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Copy binary
+        run: |
+          mkdir -p release
+          cp target/${{ matrix.target }}/release/smtpspammer release/smtpspammer-macos-${{ matrix.arch }}
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: macos-${{ matrix.arch }}
+          path: release/
+
+  # Create GitHub Release and upload all artifacts
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build-linux, build-windows, build-macos]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4.3.0
+        with:
+          path: artifacts/
+
+      - name: Collect release assets
+        run: |
+          mkdir -p release
+          find artifacts/ -type f -exec cp {} release/ \;
+          ls -la release/
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION=${VERSION#v}
+          if [[ "$VERSION" == "master" ]] || [[ "$VERSION" == "main" ]]; then
+            VERSION="1.0.0"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: smtpspammer v${{ steps.version.outputs.version }}
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release/*
