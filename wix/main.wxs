@@ -47,7 +47,7 @@
               Id='exe0'
               Name='smtpspammer.exe'
               DiskId='1'
-              Source='target\$(var.Profile)\smtpspammer.exe'
+              Source='$(var.CargoTargetBinDir)\smtpspammer.exe'
               KeyPath='yes'/>
           </Component>
 
