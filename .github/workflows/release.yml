@@ -106,7 +106,7 @@ jobs:
           name: linux-${{ matrix.arch }}
           path: release/
 
-  # Build Windows binary
+  # Build Windows binary and MSI installer
   build-windows:
     name: Build Windows - x64
     runs-on: windows-latest
@@ -121,10 +121,34 @@ jobs:
       - name: Build binary
         run: cargo build --release --target x86_64-pc-windows-msvc
 
-      - name: Copy binary
+      - name: Stage binary for WiX
         run: |
-          mkdir release
-          copy target\x86_64-pc-windows-msvc\release\smtpspammer.exe release\smtpspammer-windows-x64.exe
+          New-Item -ItemType Directory -Force -Path target\release
+          Copy-Item target\x86_64-pc-windows-msvc\release\smtpspammer.exe target\release\smtpspammer.exe
+
+      - name: Install WiX v3 toolset
+        run: choco install wixtoolset --version 3.14.1 -y
+
+      - name: Install cargo-wix
+        run: cargo install cargo-wix --version 0.3.9
+
+      - name: Extract version
+        id: version
+        shell: pwsh
+        run: |
+          $VERSION = "${{ github.ref_name }}" -replace '^v', ''
+          if ($VERSION -eq 'master' -or $VERSION -eq 'main') { $VERSION = '0.0.0' }
+          echo "version=$VERSION" >> $env:GITHUB_OUTPUT
+
+      - name: Build MSI installer
+        run: cargo wix --no-build --nocapture --version ${{ steps.version.outputs.version }}
+
+      - name: Collect release artifacts
+        run: |
+          New-Item -ItemType Directory -Force -Path release
+          Copy-Item target\x86_64-pc-windows-msvc\release\smtpspammer.exe release\smtpspammer-windows-x64.exe
+          Copy-Item target\wix\smtpspammer-${{ steps.version.outputs.version }}-x86_64.msi `
+            release\smtpspammer-${{ steps.version.outputs.version }}-x86_64.msi
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4.6.2
