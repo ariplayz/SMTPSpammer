@@ -297,6 +297,7 @@ jobs:
           
           # Build MSI using found wix path
           & "$wixPath" build wix\main.wxs `
+            -arch ${{ matrix.arch }} `
             -d Version="$version" `
             -d CargoTargetBinDir=target\${{ matrix.target }}\release `
             -d PlatformArch=${{ matrix.arch }} `

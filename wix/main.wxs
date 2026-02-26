@@ -1,70 +1,59 @@
 <?xml version='1.0' encoding='windows-1252'?>
 <!--
-  WiX v3 installer for smtpspammer.
+  WiX v4+ installer for smtpspammer.
   Built with cargo-wix (https://github.com/volks73/cargo-wix).
 -->
-<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
+<Wix xmlns='http://wixtoolset.org/schemas/v4/wxs'
+     xmlns:ui='http://wixtoolset.org/schemas/v4/wxs/ui'>
 
-  <?if $(sys.BUILDARCH) = x64 or $(sys.BUILDARCH) = arm64 ?>
+  <?if $(var.PlatformArch) = x64 or $(var.PlatformArch) = arm64 ?>
     <?define PlatformProgramFilesFolder = "ProgramFiles64Folder" ?>
   <?else?>
     <?define PlatformProgramFilesFolder = "ProgramFilesFolder" ?>
   <?endif?>
 
-  <Product
-    Id='*'
+  <Package
     Name='smtpspammer'
-    UpgradeCode='{66750EFC-EE3E-4CD4-A5C0-F700BF1B58C0}'
+    UpgradeCode='66750EFC-EE3E-4CD4-A5C0-F700BF1B58C0'
     Manufacturer='Ari Cummings'
     Language='1033'
     Codepage='1252'
-    Version='$(var.Version)'>
-
-    <Package Id='*'
-      Keywords='Installer'
-      Description='Bulk email sender via Proton Mail SMTP'
-      Manufacturer='Ari Cummings'
-      InstallerVersion='450'
-      Languages='1033'
-      Compressed='yes'
-      InstallScope='perMachine'
-      SummaryCodepage='1252'
-      Platform='$(sys.BUILDARCH)'/>
+    Version='$(var.Version)'
+    Scope='perMachine'
+    InstallerVersion='450'>
 
     <MajorUpgrade
       Schedule='afterInstallInitialize'
       DowngradeErrorMessage='A newer version of [ProductName] is already installed. Setup will now exit.'/>
 
-    <Media Id='1' Cabinet='media1.cab' EmbedCab='yes' DiskPrompt='Disk #1'/>
+    <MediaTemplate EmbedCab='yes' />
+
     <Property Id='DiskPrompt' Value='smtpspammer Installation'/>
 
-    <Directory Id='TARGETDIR' Name='SourceDir'>
-      <Directory Id='$(var.PlatformProgramFilesFolder)' Name='PFiles'>
-        <Directory Id='APPLICATIONFOLDER' Name='smtpspammer'>
+    <StandardDirectory Id='$(var.PlatformProgramFilesFolder)'>
+      <Directory Id='APPLICATIONFOLDER' Name='smtpspammer'>
 
-          <Component Id='binary0' Guid='*'>
-            <File
-              Id='exe0'
-              Name='smtpspammer.exe'
-              DiskId='1'
-              Source='$(var.CargoTargetBinDir)\smtpspammer.exe'
-              KeyPath='yes'/>
-          </Component>
+        <Component Id='binary0' Guid='*'>
+          <File
+            Id='exe0'
+            Name='smtpspammer.exe'
+            Source='$(var.CargoTargetBinDir)\smtpspammer.exe'
+            KeyPath='yes'/>
+        </Component>
 
-          <Component Id='Path' Guid='*' KeyPath='yes'>
-            <Environment
-              Id='PATH'
-              Name='PATH'
-              Value='[APPLICATIONFOLDER]'
-              Permanent='no'
-              Part='last'
-              Action='set'
-              System='yes'/>
-          </Component>
+        <Component Id='Path' Guid='*' KeyPath='yes'>
+          <Environment
+            Id='PATH'
+            Name='PATH'
+            Value='[APPLICATIONFOLDER]'
+            Permanent='no'
+            Part='last'
+            Action='set'
+            System='yes'/>
+        </Component>
 
-        </Directory>
       </Directory>
-    </Directory>
+    </StandardDirectory>
 
     <Feature
       Id='Binaries'
@@ -91,9 +80,8 @@
 
     <SetDirectory Id='APPLICATIONFOLDER' Value='[$(var.PlatformProgramFilesFolder)]smtpspammer'/>
 
-    <UIRef Id='WixUI_FeatureTree'/>
-    <UIRef Id='WixUI_ErrorProgressText'/>
+    <ui:WixUI Id='WixUI_FeatureTree'/>
 
-  </Product>
+  </Package>
 
 </Wix>
