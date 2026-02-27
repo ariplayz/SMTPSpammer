@@ -9,6 +9,7 @@ use std::process;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Parser)]
 #[command(name = "smtpspammer", about = "Bulk email sender via Proton Mail SMTP")]
@@ -200,10 +201,17 @@ fn main() {
                         let mailer_ref = &mailer;
 
                         handles.push(s.spawn(move || {
+                            let ts = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .map(|d| d.as_nanos())
+                                .unwrap_or(0);
+                            let msg_id =
+                                format!("<{i}.{ts}@smtpspammer.local>");
                             let email = Message::builder()
                                 .from(from)
                                 .to(to)
                                 .subject(subj)
+                                .message_id(Some(msg_id))
                                 .body(bod)
                                 .unwrap_or_else(|e| {
                                     eprintln!("error: failed to build email message: {e}");
