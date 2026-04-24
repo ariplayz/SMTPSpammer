@@ -194,7 +194,7 @@ fn main() {
                     for i in pending.iter().copied() {
                         let from = from_mailbox.clone();
                         let to = to_mailbox.clone();
-                        let subj = &subject;
+                        let subj = format!("{} ({}/{})", subject, i, count);
                         let bod = body.clone();
                         let sent_ref = &sent;
                         let next_failed_ref = &next_failed;
@@ -205,8 +205,8 @@ fn main() {
                                 .duration_since(UNIX_EPOCH)
                                 .map(|d| d.as_nanos())
                                 .unwrap_or(0);
-                            let msg_id =
-                                format!("<{i}.{ts}@smtpspammer.local>");
+                            let domain = username.split('@').last().unwrap_or("localhost");
+                            let msg_id = format!("<{i}@{ts}.{domain}>");
                             let email = Message::builder()
                                 .from(from)
                                 .to(to)
